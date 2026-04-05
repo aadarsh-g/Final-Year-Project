@@ -65,12 +65,22 @@ exports.getAllBooks = async (req, res) => {
   }
 };
 
-// @desc    Get single book by ID
+// @desc    Get single book by ID or slug
 // @route   GET /api/books/:id
 // @access  Public
 exports.getBookById = async (req, res) => {
   try {
-    const book = await Book.findById(req.params.id);
+    const { id } = req.params;
+    let book;
+
+    // Check if the parameter is a MongoDB ObjectId or a slug
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      // It's a valid MongoDB ObjectId
+      book = await Book.findById(id);
+    } else {
+      // It's a slug
+      book = await Book.findOne({ slug: id });
+    }
 
     if (!book) {
       return res.status(404).json({
@@ -354,6 +364,105 @@ exports.toggleBookActive = async (req, res) => {
       message: 'Failed to toggle book status',
       error: error.message
     });
+  }
+};
+
+// @desc    Get reviews for a book
+// @route   GET /api/books/:id/reviews
+// @access  Public
+exports.getReviews = async (req, res) => {
+  try {
+    const book = await Book.findById(req.params.id).select('reviews rating');
+    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
+
+    const reviews = [...book.reviews].sort((a, b) => b.createdAt - a.createdAt);
+    res.json({ success: true, reviews, rating: book.rating });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to fetch reviews', error: error.message });
+  }
+};
+
+// @desc    Add a review for a book
+// @route   POST /api/books/:id/reviews
+// @access  Private
+exports.addReview = async (req, res) => {
+  try {
+    const { rating, comment } = req.body;
+
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({ success: false, message: 'Rating must be between 1 and 5' });
+    }
+
+    const book = await Book.findById(req.params.id);
+    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
+
+    // One review per user per book
+    const alreadyReviewed = book.reviews.find(
+      r => r.user.toString() === req.user.id
+    );
+    if (alreadyReviewed) {
+      return res.status(400).json({ success: false, message: 'You have already reviewed this book' });
+    }
+
+    book.reviews.push({
+      user: req.user.id,
+      userName: req.user.fullName || req.user.name || 'User',
+      rating: Number(rating),
+      comment: comment || '',
+    });
+
+    // Recalculate average rating
+    book.rating.count = book.reviews.length;
+    book.rating.average =
+      Math.round((book.reviews.reduce((sum, r) => sum + r.rating, 0) / book.reviews.length) * 10) / 10;
+
+    await book.save();
+
+    const newReview = book.reviews[book.reviews.length - 1];
+    res.status(201).json({ success: true, review: newReview, rating: book.rating });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to add review', error: error.message });
+  }
+};
+
+// @desc    Update own review for a book
+// @route   PUT /api/books/:id/reviews/:reviewId
+// @access  Private
+exports.updateReview = async (req, res) => {
+  try {
+    const { rating, comment } = req.body;
+    const { id: bookId, reviewId } = req.params;
+
+    if (!rating || rating < 1 || rating > 5) {
+      return res.status(400).json({ success: false, message: 'Rating must be between 1 and 5' });
+    }
+
+    const book = await Book.findById(bookId);
+    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
+
+    const review = book.reviews.id(reviewId);
+    if (!review) {
+      return res.status(404).json({ success: false, message: 'Review not found' });
+    }
+
+    if (review.user.toString() !== req.user.id) {
+      return res.status(403).json({ success: false, message: 'You can only edit your own review' });
+    }
+
+    review.rating = Number(rating);
+    review.comment = comment != null ? String(comment).slice(0, 1000) : '';
+    review.updatedAt = new Date();
+    if (req.user.fullName) review.userName = req.user.fullName;
+
+    book.rating.count = book.reviews.length;
+    book.rating.average =
+      Math.round((book.reviews.reduce((sum, r) => sum + r.rating, 0) / book.reviews.length) * 10) / 10;
+
+    await book.save();
+
+    res.json({ success: true, review, rating: book.rating });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Failed to update review', error: error.message });
   }
 };
 

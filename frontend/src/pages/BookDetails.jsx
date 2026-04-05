@@ -1,23 +1,134 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
+import axios from "axios";
+import { useAuth } from "../context/AuthContext";
 
 function BookDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user: authUser } = useAuth();
   
+  const [book, setBook] = useState(null);
+  const [relatedBooks, setRelatedBooks] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [selectedOption, setSelectedOption] = useState("buy"); // 'buy' or 'rent'
-  const [rentalDuration, setRentalDuration] = useState(7); // days
+  const [rentStartDate, setRentStartDate] = useState('');
+  const [rentEndDate, setRentEndDate] = useState('');
+  const [rentalDays, setRentalDays] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [activeTab, setActiveTab] = useState("description"); // description, reviews, details
 
-  // Sample book data (in real app, fetch from API based on id)
+  // Reviews state
+  const [reviews, setReviews] = useState([]);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewHover, setReviewHover] = useState(0);
+  const [reviewComment, setReviewComment] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const [reviewSuccess, setReviewSuccess] = useState('');
+
+  const [editingReviewId, setEditingReviewId] = useState(null);
+  const [editRating, setEditRating] = useState(0);
+  const [editComment, setEditComment] = useState('');
+  const [editHover, setEditHover] = useState(0);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState('');
+
+  const currentUserId = useMemo(() => {
+    const u = authUser || (() => {
+      try {
+        return JSON.parse(localStorage.getItem("user") || "{}");
+      } catch {
+        return null;
+      }
+    })();
+    if (!u) return null;
+    return u.id || u._id;
+  }, [authUser]);
+
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  const isReviewMine = (r) => currentUserId && String(r.user) === String(currentUserId);
+  const myReview = reviews.find(isReviewMine);
+
+  // Fetch book details from API
+  useEffect(() => {
+    const fetchBookDetails = async () => {
+      try {
+        setLoading(true);
+        const response = await axios.get(`http://localhost:5001/api/books/${id}`);
+        setBook(response.data.book);
+
+        // Fetch reviews
+        try {
+          const revRes = await axios.get(`http://localhost:5001/api/books/${id}/reviews`);
+          setReviews(revRes.data.reviews || []);
+        } catch (_) { /* reviews non-critical */ }
+
+        // Fetch related books (same category)
+        if (response.data.book?.category) {
+          const relatedResponse = await axios.get("http://localhost:5001/api/books", {
+            params: {
+              category: response.data.book.category,
+              isActive: 'true',
+              limit: 4
+            }
+          });
+          // Filter out current book and limit to 3
+          const filtered = relatedResponse.data.books
+            .filter(b => b._id !== id)
+            .slice(0, 3);
+          setRelatedBooks(filtered);
+        }
+      } catch (error) {
+        console.error('Error fetching book details:', error);
+        console.error('Error response:', error.response?.data);
+        console.error('Error status:', error.response?.status);
+        
+        // Set book to null to trigger "not found" page
+        setBook(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchBookDetails();
+  }, [id]);
+
+  // Calculate rental days when dates change
+  useEffect(() => {
+    if (rentStartDate && rentEndDate) {
+      const start = new Date(rentStartDate);
+      const end = new Date(rentEndDate);
+      const diffTime = Math.abs(end - start);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      setRentalDays(diffDays);
+    } else {
+      setRentalDays(0);
+    }
+  }, [rentStartDate, rentEndDate]);
+
+  // Update page title dynamically
+  useEffect(() => {
+    if (book?.title) {
+      document.title = `${book.title} - Bookify`;
+    } else {
+      document.title = 'Book Details - Bookify';
+    }
+    
+    // Cleanup: reset title when component unmounts
+    return () => {
+      document.title = 'Bookify';
+    };
+  }, [book]);
+
+  // Sample book data (fallback - will be replaced by API data)
   const booksData = {
     1: {
       id: 1,
       title: "It Ends With Us",
       author: "Colleen Hoover",
-      price: 14.99,
-      rentPrice: 3.99,
+      price: 600,
+      rentPrice: 100,
       rating: 4.5,
       reviews: 234,
       totalReviews: 234,
@@ -42,8 +153,8 @@ function BookDetails() {
       id: 2,
       title: "The Great Gatsby",
       author: "F. Scott Fitzgerald",
-      price: 12.99,
-      rentPrice: 2.99,
+      price: 500,
+      rentPrice: 100,
       rating: 4.8,
       reviews: 456,
       totalReviews: 456,
@@ -66,62 +177,204 @@ function BookDetails() {
     },
   };
 
-  const book = booksData[id] || booksData[1]; // Default to first book if not found
 
-  const relatedBooks = [
-    { id: 2, title: "The Great Gatsby", author: "F. Scott Fitzgerald", image: "/images/The Great Gatsby.jpg", price: 12.99 },
-    { id: 3, title: "The Fault In Our Stars", author: "John Green", image: "/images/The Fault In Our Stars.jpg", price: 13.99 },
-    { id: 4, title: "Harry Potter", author: "J.K. Rowling", image: "/images/Harry Potter.jpg", price: 16.99 },
-  ];
-
-  const sampleReviews = [
-    {
-      id: 1,
-      userName: "Sarah Johnson",
-      rating: 5,
-      date: "December 15, 2024",
-      comment: "Absolutely loved this book! The story was captivating from start to finish. Highly recommend!",
-    },
-    {
-      id: 2,
-      userName: "Michael Brown",
-      rating: 4,
-      date: "December 10, 2024",
-      comment: "Great read! The characters were well-developed and the plot kept me engaged throughout.",
-    },
-    {
-      id: 3,
-      userName: "Emily Davis",
-      rating: 5,
-      date: "December 5, 2024",
-      comment: "One of the best books I've read this year. Couldn't put it down!",
-    },
-  ];
-
+  // Calculate rental price based on days (Rs. 50 per day)
   const calculateRentalPrice = () => {
-    const weeks = Math.ceil(rentalDuration / 7);
-    return (book.rentPrice * weeks).toFixed(2);
+    return (rentalDays * 50).toFixed(2);
   };
 
-  const handleAddToCart = () => {
-    const item = {
-      bookId: book.id,
-      title: book.title,
-      type: selectedOption,
-      price: selectedOption === "buy" ? book.price : parseFloat(calculateRentalPrice()),
-      quantity: selectedOption === "buy" ? quantity : 1,
-      rentalDuration: selectedOption === "rent" ? rentalDuration : null,
-    };
-    console.log("Adding to cart:", item);
-    alert(`Added "${book.title}" to cart!`);
+  // Get minimum date (today)
+  const getMinDate = () => {
+    const today = new Date();
+    return today.toISOString().split('T')[0];
   };
+
+  // Get minimum end date (start date + 1 day)
+  const getMinEndDate = () => {
+    if (!rentStartDate) return getMinDate();
+    const start = new Date(rentStartDate);
+    start.setDate(start.getDate() + 1);
+    return start.toISOString().split('T')[0];
+  };
+
+  const handleSubmitReview = async (e) => {
+    e.preventDefault();
+    setReviewError('');
+    setReviewSuccess('');
+    if (reviewRating === 0) { setReviewError('Please select a star rating.'); return; }
+    setReviewSubmitting(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await axios.post(
+        `http://localhost:5001/api/books/${id}/reviews`,
+        { rating: reviewRating, comment: reviewComment },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setReviews(prev => [res.data.review, ...prev]);
+      setBook(prev => ({ ...prev, rating: res.data.rating }));
+      setReviewRating(0);
+      setReviewComment('');
+      setReviewSuccess('Your review has been submitted!');
+    } catch (err) {
+      setReviewError(err.response?.data?.message || 'Failed to submit review.');
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
+  const startEditReview = (review) => {
+    setEditError('');
+    setEditingReviewId(review._id);
+    setEditRating(review.rating);
+    setEditComment(review.comment || '');
+    setEditHover(0);
+  };
+
+  const cancelEditReview = () => {
+    setEditingReviewId(null);
+    setEditError('');
+  };
+
+  const handleSaveEditReview = async (e) => {
+    e.preventDefault();
+    setEditError('');
+    if (editRating < 1) {
+      setEditError('Please select a star rating.');
+      return;
+    }
+    setEditSubmitting(true);
+    try {
+      const t = localStorage.getItem("token");
+      const res = await axios.put(
+        `http://localhost:5001/api/books/${id}/reviews/${editingReviewId}`,
+        { rating: editRating, comment: editComment },
+        { headers: { Authorization: `Bearer ${t}` } }
+      );
+      setReviews((prev) =>
+        prev.map((r) => (r._id === editingReviewId ? res.data.review : r))
+      );
+      setBook((prev) => ({ ...prev, rating: res.data.rating }));
+      setEditingReviewId(null);
+    } catch (err) {
+      setEditError(err.response?.data?.message || "Failed to update review.");
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const handleAddToCart = async () => {
+    if (!book) return;
+    
+    // Validate rental dates if renting
+    if (selectedOption === 'rent') {
+      if (!rentStartDate || !rentEndDate) {
+        alert('Please select rental start and end dates');
+        return;
+      }
+      if (rentalDays < 1) {
+        alert('Minimum rental period is 1 day');
+        return;
+      }
+    }
+    
+    try {
+      const token = localStorage.getItem('token');
+      const user = JSON.parse(localStorage.getItem('user') || '{}');
+      
+      const requestData = {
+        userId: user._id || user.id,
+        bookId: book._id,
+        type: selectedOption === 'buy' ? 'purchase' : 'rental',
+        quantity: selectedOption === 'buy' ? quantity : undefined,
+      };
+
+      // Add rental dates if renting
+      if (selectedOption === 'rent') {
+        requestData.rentStartDate = rentStartDate;
+        requestData.rentEndDate = rentEndDate;
+      }
+
+      const response = await axios.post(
+        'http://localhost:5001/api/cart/add',
+        requestData,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+
+      if (response.data.success) {
+        // Trigger cart update event
+        window.dispatchEvent(new Event('cart-updated'));
+        alert(`"${book.title}" added to cart!`);
+        
+        // Reset rental dates after adding
+        if (selectedOption === 'rent') {
+          setRentStartDate('');
+          setRentEndDate('');
+          setRentalDays(0);
+        }
+      }
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      alert(error.response?.data?.message || 'Failed to add to cart');
+    }
+  };
+
+  const handleAddToWishlist = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        'http://localhost:5001/api/wishlist/add',
+        { bookId: id },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Trigger wishlist update event
+      window.dispatchEvent(new Event('wishlist-updated'));
+      alert('Added to wishlist!');
+    } catch (error) {
+      if (error.response?.data?.message === 'Book already in wishlist') {
+        alert('This book is already in your wishlist!');
+      } else {
+        console.error('Error adding to wishlist:', error);
+        alert(error.response?.data?.message || 'Failed to add to wishlist');
+      }
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading book details...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!book) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">Book Not Found</h2>
+          <p className="text-gray-600 mb-6">The book you're looking for doesn't exist.</p>
+          <Link to="/catalog" className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+            Back to Catalog
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm sticky top-0 z-50">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16 md:h-20">
+          <div className="flex items-center h-16 md:h-20">
             <Link to="/" className="flex items-center space-x-2">
               <div className="flex flex-col">
                 <div className="w-6 h-6 bg-green-500 rounded-sm mb-0.5"></div>
@@ -132,27 +385,6 @@ function BookDetails() {
                 Bookify
               </span>
             </Link>
-
-            <nav className="hidden md:flex items-center space-x-8">
-              <Link to="/" className="text-gray-700 hover:text-blue-600 transition">
-                Home
-              </Link>
-              <Link to="/catalog" className="text-gray-700 hover:text-blue-600 transition">
-                Catalog
-              </Link>
-              <a href="#about" className="text-gray-700 hover:text-blue-600 transition">
-                About us
-              </a>
-            </nav>
-
-            <div className="flex items-center space-x-4">
-              <Link to="/login" className="hidden sm:block text-gray-700 hover:text-blue-600 transition">
-                Log in
-              </Link>
-              <Link to="/signup" className="px-4 py-2 border-2 border-amber-600 text-gray-800 hover:bg-amber-50 rounded-md transition text-sm md:text-base">
-                Sign up
-              </Link>
-            </div>
           </div>
         </div>
       </header>
@@ -161,10 +393,6 @@ function BookDetails() {
       <div className="bg-white border-b border-gray-200">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center space-x-2 text-sm">
-            <Link to="/" className="text-blue-600 hover:text-blue-700">
-              Home
-            </Link>
-            <span className="text-gray-400">/</span>
             <Link to="/catalog" className="text-blue-600 hover:text-blue-700">
               Catalog
             </Link>
@@ -183,11 +411,11 @@ function BookDetails() {
               <div className="bg-white rounded-lg shadow-lg overflow-hidden">
                 <div className="aspect-[2/3] bg-gray-200">
                   <img
-                    src={book.image}
+                    src={book.coverImage || 'https://via.placeholder.com/400x600?text=No+Cover'}
                     alt={book.title}
                     className="w-full h-full object-cover"
                     onError={(e) => {
-                      e.target.style.display = "none";
+                      e.target.src = 'https://via.placeholder.com/400x600?text=No+Cover';
                     }}
                   />
                 </div>
@@ -199,11 +427,11 @@ function BookDetails() {
                   <div className="flex items-center justify-between mb-4">
                     <div>
                       <p className="text-sm text-gray-600">Buy Price</p>
-                      <p className="text-3xl font-bold text-gray-900">${book.price}</p>
+                      <p className="text-3xl font-bold text-gray-900">Rs. {book.price?.purchase || 0}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-sm text-gray-600">Rent From</p>
-                      <p className="text-2xl font-bold text-blue-600">${book.rentPrice}/week</p>
+                      <p className="text-2xl font-bold text-blue-600">Rs. {book.price?.rental?.perDay || 0}/day</p>
                     </div>
                   </div>
                 </div>
@@ -229,7 +457,7 @@ function BookDetails() {
                         <svg
                           key={i}
                           className={`w-5 h-5 ${
-                            i < Math.floor(book.rating) ? "fill-current" : "fill-gray-300"
+                            i < Math.floor(book.rating?.average || 0) ? "fill-current" : "fill-gray-300"
                           }`}
                           viewBox="0 0 20 20"
                         >
@@ -237,11 +465,11 @@ function BookDetails() {
                         </svg>
                       ))}
                     </div>
-                    <span className="ml-2 text-gray-700 font-medium">{book.rating}</span>
+                    <span className="ml-2 text-gray-700 font-medium">{book.rating?.average || 0}</span>
                   </div>
                   <span className="text-gray-500">|</span>
                   <Link to="#reviews" className="text-blue-600 hover:text-blue-700">
-                    {book.totalReviews} reviews
+                    {book.rating?.count || 0} reviews
                   </Link>
                 </div>
               </div>
@@ -251,8 +479,12 @@ function BookDetails() {
                 <span className="px-4 py-2 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
                   {book.category}
                 </span>
-                <span className="px-4 py-2 bg-green-100 text-green-800 rounded-full text-sm font-medium">
-                  {book.availability}
+                <span className={`px-4 py-2 rounded-full text-sm font-medium ${
+                  book.stock?.available > 0 
+                    ? 'bg-green-100 text-green-800' 
+                    : 'bg-red-100 text-red-800'
+                }`}>
+                  {book.stock?.available > 0 ? `In Stock (${book.stock.available})` : 'Out of Stock'}
                 </span>
               </div>
 
@@ -300,7 +532,7 @@ function BookDetails() {
                     <div className="flex items-center justify-between mb-4">
                       <div>
                         <p className="text-sm text-gray-600 mb-1">Purchase Price</p>
-                        <p className="text-4xl font-bold text-gray-900">${book.price}</p>
+                        <p className="text-4xl font-bold text-gray-900">Rs. {book.price?.purchase || 0}</p>
                       </div>
                       <div className="flex items-center space-x-3">
                         <label className="text-sm text-gray-700 font-medium">Quantity:</label>
@@ -331,12 +563,12 @@ function BookDetails() {
                       <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                       </svg>
-                      <span>Free shipping on orders over $25</span>
+                      <span>Free shipping on orders over Rs. 2500</span>
                     </div>
                     <div className="flex items-center justify-between pt-4 border-t border-gray-200">
                       <span className="text-lg font-semibold text-gray-700">Total:</span>
                       <span className="text-3xl font-bold text-gray-900">
-                        ${(book.price * quantity).toFixed(2)}
+                        Rs. {((book.price?.purchase || 0) * quantity).toFixed(2)}
                       </span>
                     </div>
                   </div>
@@ -345,54 +577,89 @@ function BookDetails() {
                 {/* Rent Option Details */}
                 {selectedOption === "rent" && (
                   <div className="bg-blue-50 rounded-lg p-6">
+                    <div className="mb-6">
+                      <p className="text-sm text-gray-600 mb-2">Rental Price</p>
+                      <p className="text-2xl font-bold text-blue-600">Rs. 50/day</p>
+                      <p className="text-xs text-gray-500 mt-1">Fixed daily rental rate</p>
+                    </div>
+
                     <div className="mb-4">
-                      <p className="text-sm text-gray-600 mb-1">Rental Price</p>
-                      <p className="text-4xl font-bold text-blue-600">${book.rentPrice}/week</p>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        📅 Rent Start Date *
+                      </label>
+                      <input
+                        type="date"
+                        value={rentStartDate}
+                        onChange={(e) => setRentStartDate(e.target.value)}
+                        min={getMinDate()}
+                        className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 font-medium"
+                        required
+                      />
                     </div>
 
                     <div className="mb-6">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Rental Duration
+                        📅 Return Date *
                       </label>
-                      <div className="grid grid-cols-4 gap-2">
-                        {[7, 14, 21, 30].map((days) => (
-                          <button
-                            key={days}
-                            onClick={() => setRentalDuration(days)}
-                            className={`py-2 px-3 rounded-lg text-sm font-medium transition ${
-                              rentalDuration === days
-                                ? "bg-blue-600 text-white"
-                                : "bg-white text-gray-700 border border-gray-300 hover:border-blue-600"
-                            }`}
-                          >
-                            {days} days
-                          </button>
-                        ))}
-                      </div>
+                      <input
+                        type="date"
+                        value={rentEndDate}
+                        onChange={(e) => setRentEndDate(e.target.value)}
+                        min={getMinEndDate()}
+                        disabled={!rentStartDate}
+                        className="w-full px-4 py-3 border-2 border-blue-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 font-medium disabled:bg-gray-100 disabled:cursor-not-allowed"
+                        required
+                      />
+                      {!rentStartDate && (
+                        <p className="text-xs text-gray-500 mt-1">Please select start date first</p>
+                      )}
                     </div>
+
+                    {rentalDays > 0 && (
+                      <div className="mb-4 p-3 bg-blue-100 border border-blue-300 rounded-lg">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-blue-900">
+                            📆 Total Rental Period:
+                          </span>
+                          <span className="text-lg font-bold text-blue-900">
+                            {rentalDays} {rentalDays === 1 ? 'day' : 'days'}
+                          </span>
+                        </div>
+                      </div>
+                    )}
 
                     <div className="flex items-center space-x-2 text-sm text-gray-600 mb-4">
                       <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                       </svg>
-                      <span>Flexible rental period</span>
+                      <span>Flexible rental period (minimum 1 day)</span>
                     </div>
-                    <div className="flex items-center space-x-2 text-sm text-gray-600 mb-6">
+                    <div className="flex items-center space-x-2 text-sm text-gray-600 mb-4">
                       <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                       </svg>
                       <span>Easy return process</span>
                     </div>
 
-                    <div className="flex items-center justify-between pt-4 border-t border-blue-200">
+                    {/* Late fine warning */}
+                    <div className="flex items-start space-x-2 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2 mb-5">
+                      <span className="text-amber-500 text-base mt-0.5">⚠️</span>
+                      <p className="text-xs text-amber-800 leading-snug">
+                        <strong>Late return fine:</strong> Rs. 100/day will be charged for every day past the return date. Please return on time.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-4 border-t-2 border-blue-200">
                       <div>
-                        <span className="text-sm text-gray-600 block">Total for {rentalDuration} days:</span>
-                        <span className="text-lg font-semibold text-gray-700">
-                          {Math.ceil(rentalDuration / 7)} week{Math.ceil(rentalDuration / 7) > 1 ? "s" : ""}
-                        </span>
+                        <span className="text-sm text-gray-600 block">Total Rental Cost:</span>
+                        {rentalDays > 0 && (
+                          <span className="text-xs text-gray-500">
+                            ({rentalDays} {rentalDays === 1 ? 'day' : 'days'} × Rs. 50)
+                          </span>
+                        )}
                       </div>
                       <span className="text-3xl font-bold text-blue-600">
-                        ${calculateRentalPrice()}
+                        Rs. {rentalDays > 0 ? calculateRentalPrice() : '0.00'}
                       </span>
                     </div>
                   </div>
@@ -409,8 +676,14 @@ function BookDetails() {
                   <span>Add to Cart</span>
                 </button>
 
-                <button className="w-full mt-3 py-3 border-2 border-gray-300 hover:border-gray-400 text-gray-700 font-medium rounded-lg transition duration-200">
-                  Add to Wishlist
+                <button 
+                  onClick={handleAddToWishlist}
+                  className="w-full mt-3 py-3 border-2 border-red-300 hover:border-red-400 hover:bg-red-50 text-red-600 font-medium rounded-lg transition duration-200 flex items-center justify-center space-x-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                  </svg>
+                  <span>Add to Wishlist</span>
                 </button>
               </div>
 
@@ -445,7 +718,7 @@ function BookDetails() {
                         : "text-gray-600 hover:text-gray-800"
                     }`}
                   >
-                    Reviews ({book.totalReviews})
+                    Reviews ({book.rating?.count || 0})
                   </button>
                 </div>
               </div>
@@ -454,28 +727,34 @@ function BookDetails() {
               <div>
                 {activeTab === "description" && (
                   <div>
-                    <p className="text-gray-700 leading-relaxed mb-6">{book.description}</p>
-                    <h4 className="font-semibold text-gray-900 mb-3">Key Features:</h4>
-                    <ul className="space-y-2">
-                      {book.features.map((feature, index) => (
-                        <li key={index} className="flex items-start">
-                          <svg
-                            className="w-5 h-5 text-green-600 mr-2 mt-0.5 flex-shrink-0"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M5 13l4 4L19 7"
-                            />
-                          </svg>
-                          <span className="text-gray-700">{feature}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    <p className="text-gray-700 leading-relaxed mb-6">
+                      {book.description || 'No description available for this book.'}
+                    </p>
+                    {book.genre && book.genre.length > 0 && (
+                      <>
+                        <h4 className="font-semibold text-gray-900 mb-3">Genres:</h4>
+                        <ul className="space-y-2">
+                          {book.genre.map((genre, index) => (
+                            <li key={index} className="flex items-start">
+                              <svg
+                                className="w-5 h-5 text-green-600 mr-2 mt-0.5 flex-shrink-0"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M5 13l4 4L19 7"
+                                />
+                              </svg>
+                              <span className="text-gray-700">{genre}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -495,7 +774,9 @@ function BookDetails() {
                     </div>
                     <div className="flex justify-between py-3 border-b border-gray-200">
                       <span className="text-gray-600">Publish Date:</span>
-                      <span className="text-gray-900 font-medium">{book.publishDate}</span>
+                      <span className="text-gray-900 font-medium">
+                        {book.publishedDate ? new Date(book.publishedDate).toLocaleDateString() : 'N/A'}
+                      </span>
                     </div>
                     <div className="flex justify-between py-3 border-b border-gray-200">
                       <span className="text-gray-600">Language:</span>
@@ -510,64 +791,203 @@ function BookDetails() {
 
                 {activeTab === "reviews" && (
                   <div id="reviews">
-                    <div className="mb-6">
-                      <h4 className="text-xl font-bold text-gray-900 mb-4">Customer Reviews</h4>
-                      <div className="flex items-center mb-6">
-                        <div className="text-5xl font-bold text-gray-900 mr-6">{book.rating}</div>
-                        <div>
-                          <div className="flex text-yellow-400 mb-2">
-                            {[...Array(5)].map((_, i) => (
-                              <svg
-                                key={i}
-                                className={`w-6 h-6 ${
-                                  i < Math.floor(book.rating) ? "fill-current" : "fill-gray-300"
-                                }`}
-                                viewBox="0 0 20 20"
-                              >
-                                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                              </svg>
-                            ))}
-                          </div>
-                          <p className="text-gray-600">Based on {book.totalReviews} reviews</p>
+                    <div className="flex items-center gap-6 mb-6 pb-6 border-b border-gray-200">
+                      <div className="text-4xl font-bold text-gray-900">{book.rating?.average ?? 0}</div>
+                      <div>
+                        <div className="flex text-yellow-400 mb-1">
+                          {[...Array(5)].map((_, i) => (
+                            <svg
+                              key={i}
+                              className={`w-5 h-5 ${
+                                i < Math.floor(book.rating?.average || 0) ? "fill-current" : "fill-gray-300"
+                              }`}
+                              viewBox="0 0 20 20"
+                            >
+                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                            </svg>
+                          ))}
                         </div>
+                        <p className="text-sm text-gray-600">{book.rating?.count || 0} review{(book.rating?.count || 0) !== 1 ? 's' : ''}</p>
                       </div>
                     </div>
 
-                    <div className="space-y-6">
-                      {sampleReviews.map((review) => (
-                        <div key={review.id} className="border-b border-gray-200 pb-6">
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="flex items-center space-x-3">
-                              <div className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-semibold">
-                                {review.userName.charAt(0)}
-                              </div>
-                              <div>
-                                <p className="font-semibold text-gray-900">{review.userName}</p>
-                                <p className="text-sm text-gray-500">{review.date}</p>
-                              </div>
-                            </div>
-                            <div className="flex text-yellow-400">
-                              {[...Array(5)].map((_, i) => (
-                                <svg
-                                  key={i}
-                                  className={`w-4 h-4 ${
-                                    i < review.rating ? "fill-current" : "fill-gray-300"
-                                  }`}
-                                  viewBox="0 0 20 20"
-                                >
-                                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                                </svg>
-                              ))}
-                            </div>
-                          </div>
-                          <p className="text-gray-700">{review.comment}</p>
-                        </div>
-                      ))}
-                    </div>
+                    {token && !myReview && (
+                    <form onSubmit={handleSubmitReview} className="mb-8 space-y-3">
+                      <p className="text-sm font-medium text-gray-800">Your rating</p>
+                      <div className="flex items-center gap-1">
+                        {[1,2,3,4,5].map(star => (
+                          <button
+                            key={star}
+                            type="button"
+                            onClick={() => setReviewRating(star)}
+                            onMouseEnter={() => setReviewHover(star)}
+                            onMouseLeave={() => setReviewHover(0)}
+                            className="focus:outline-none"
+                            aria-label={`${star} star${star > 1 ? 's' : ''}`}
+                          >
+                            <svg
+                              className={`w-8 h-8 transition-colors ${
+                                star <= (reviewHover || reviewRating)
+                                  ? 'text-yellow-400 fill-current'
+                                  : 'text-gray-300 fill-current'
+                              }`}
+                              viewBox="0 0 20 20"
+                            >
+                              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                            </svg>
+                          </button>
+                        ))}
+                      </div>
 
-                    <button className="mt-6 px-6 py-3 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 rounded-lg font-medium transition">
-                      Write a Review
-                    </button>
+                        <textarea
+                          value={reviewComment}
+                          onChange={e => setReviewComment(e.target.value)}
+                          placeholder="Write your review (optional)"
+                          rows={3}
+                          maxLength={1000}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                        />
+
+                        {reviewError && <p className="text-red-500 text-xs mt-1">{reviewError}</p>}
+                        {reviewSuccess && <p className="text-green-600 text-xs mt-1">{reviewSuccess}</p>}
+
+                        <button
+                          type="submit"
+                          disabled={reviewSubmitting}
+                          className="mt-3 px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium rounded-lg transition"
+                        >
+                          {reviewSubmitting ? 'Submitting…' : 'Submit Review'}
+                        </button>
+                    </form>
+                    )}
+                    {token && myReview && !editingReviewId && (
+                      <p className="text-sm text-gray-600 mb-6 p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                        You already reviewed this book. Use <strong>Edit</strong> on your review below to update it.
+                      </p>
+                    )}
+
+                    {/* Review list */}
+                    {reviews.length === 0 ? (
+                      <div className="text-center py-10 text-gray-400">
+                        <svg className="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                        </svg>
+                        <p className="font-medium text-gray-500">No reviews yet</p>
+                        <p className="text-sm mt-1">Be the first to share your thoughts on this book.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-5">
+                        {reviews.map((review) => (
+                          <div key={review._id} className="border-b border-gray-200 pb-5">
+                            {editingReviewId === review._id ? (
+                              <form onSubmit={handleSaveEditReview} className="space-y-3 bg-gray-50 rounded-lg p-4 border border-gray-200">
+                                <p className="text-sm font-medium text-gray-800">Edit your review</p>
+                                <div className="flex items-center gap-1">
+                                  {[1,2,3,4,5].map((star) => (
+                                    <button
+                                      key={star}
+                                      type="button"
+                                      onClick={() => setEditRating(star)}
+                                      onMouseEnter={() => setEditHover(star)}
+                                      onMouseLeave={() => setEditHover(0)}
+                                      className="focus:outline-none"
+                                    >
+                                      <svg
+                                        className={`w-8 h-8 transition-colors ${
+                                          star <= (editHover || editRating)
+                                            ? "text-yellow-400 fill-current"
+                                            : "text-gray-300 fill-current"
+                                        }`}
+                                        viewBox="0 0 20 20"
+                                      >
+                                        <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                      </svg>
+                                    </button>
+                                  ))}
+                                </div>
+                                <textarea
+                                  value={editComment}
+                                  onChange={(e) => setEditComment(e.target.value)}
+                                  placeholder="Write your review (optional)"
+                                  rows={3}
+                                  maxLength={1000}
+                                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                                />
+                                {editError && <p className="text-red-500 text-xs">{editError}</p>}
+                                <div className="flex gap-2">
+                                  <button
+                                    type="submit"
+                                    disabled={editSubmitting}
+                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium rounded-lg"
+                                  >
+                                    {editSubmitting ? "Saving…" : "Save changes"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={cancelEditReview}
+                                    className="px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-100"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </form>
+                            ) : (
+                              <>
+                                <div className="flex items-start justify-between gap-2 mb-2">
+                                  <div className="flex items-center space-x-3 min-w-0">
+                                    <div className="w-9 h-9 bg-blue-600 text-white rounded-full flex items-center justify-center font-semibold text-sm shrink-0">
+                                      {review.userName?.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div>
+                                      <p className="font-semibold text-gray-900 text-sm">{review.userName}</p>
+                                      <p className="text-xs text-gray-400">
+                                        {new Date(review.createdAt).toLocaleDateString("en-NP", {
+                                          day: "numeric",
+                                          month: "short",
+                                          year: "numeric",
+                                        })}
+                                        {review.updatedAt &&
+                                          new Date(review.updatedAt).getTime() >
+                                            new Date(review.createdAt).getTime() + 1000 && (
+                                            <span className="text-gray-400"> · edited</span>
+                                          )}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <div className="flex text-yellow-400">
+                                      {[1, 2, 3, 4, 5].map((i) => (
+                                        <svg
+                                          key={i}
+                                          className={`w-4 h-4 ${i <= review.rating ? "fill-current" : "fill-gray-300"}`}
+                                          viewBox="0 0 20 20"
+                                        >
+                                          <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                                        </svg>
+                                      ))}
+                                    </div>
+                                    {token && isReviewMine(review) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => startEditReview(review)}
+                                        className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+                                      >
+                                        Edit
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                                {review.comment ? (
+                                  <p className="text-gray-700 text-sm">{review.comment}</p>
+                                ) : (
+                                  <p className="text-gray-400 text-sm italic">No written comment</p>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -579,17 +999,17 @@ function BookDetails() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {relatedBooks.map((relatedBook) => (
                   <Link
-                    key={relatedBook.id}
-                    to={`/book/${relatedBook.id}`}
+                    key={relatedBook._id}
+                    to={`/book/${relatedBook._id}`}
                     className="bg-white rounded-lg shadow-md hover:shadow-lg transition overflow-hidden group"
                   >
                     <div className="aspect-[2/3] bg-gray-200 overflow-hidden">
                       <img
-                        src={relatedBook.image}
+                        src={relatedBook.coverImage || 'https://via.placeholder.com/300x400?text=No+Image'}
                         alt={relatedBook.title}
                         className="w-full h-full object-cover group-hover:scale-105 transition"
                         onError={(e) => {
-                          e.target.style.display = "none";
+                          e.target.src = 'https://via.placeholder.com/300x400?text=No+Image';
                         }}
                       />
                     </div>
@@ -598,7 +1018,7 @@ function BookDetails() {
                         {relatedBook.title}
                       </h4>
                       <p className="text-sm text-gray-600 mb-2">{relatedBook.author}</p>
-                      <p className="text-lg font-bold text-gray-900">${relatedBook.price}</p>
+                      <p className="text-lg font-bold text-gray-900">Rs. {relatedBook.price?.purchase || 0}</p>
                     </div>
                   </Link>
                 ))}

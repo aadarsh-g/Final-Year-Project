@@ -5,7 +5,9 @@ const {
   login,
   getMe,
   updateProfile,
-  changePassword
+  changePassword,
+  verifyOTP,
+  resendOTP
 } = require('../controllers/authController');
 const {
   googleAuth,
@@ -16,6 +18,10 @@ const { protect } = require('../middleware/auth');
 // Public routes
 router.post('/signup', signup);
 router.post('/login', login);
+
+// OTP verification routes
+router.post('/verify-otp', verifyOTP);
+router.post('/resend-otp', resendOTP);
 
 // Google OAuth routes
 router.post('/google', googleAuth);

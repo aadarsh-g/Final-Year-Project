@@ -1,6 +1,11 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import axios from "axios";
+import NotificationBell from "../components/NotificationBell";
+import CartIcon from "../components/CartIcon";
+import WishlistIcon from "../components/WishlistIcon";
+import UserProfileMenu from "../components/UserProfileMenu";
+import { useAuth } from "../context/AuthContext";
 
 function BookCatalog() {
   const [books, setBooks] = useState([]);
@@ -9,16 +14,89 @@ function BookCatalog() {
   const [selectedCategory, setSelectedCategory] = useState("All Books");
   const [sortBy, setSortBy] = useState("popular");
   const [viewMode, setViewMode] = useState("grid"); // grid or list
-  const navigate = useNavigate();
+  const { user: authUser } = useAuth();
+  const user =
+    authUser ||
+    (() => {
+      try {
+        return JSON.parse(localStorage.getItem("user") || "{}");
+      } catch {
+        return {};
+      }
+    })();
 
-  // Get user info
-  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  // Add to cart function
+  const addToCart = async (e, book, type) => {
+    e.preventDefault(); // Prevent navigation
+    e.stopPropagation(); // Stop event bubbling
 
-  // Logout handler
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    navigate('/login');
+    try {
+      const token = localStorage.getItem('token');
+      const response = await axios.post(
+        'http://localhost:5001/api/cart/add',
+        {
+          userId: user._id || user.id,
+          bookId: book._id,
+          type,
+          quantity: type === 'purchase' ? 1 : undefined,
+          rentalDuration: type === 'rental' ? 7 : undefined
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+
+      if (response.data.success) {
+        // Trigger cart update event
+        window.dispatchEvent(new Event('cart-updated'));
+        
+        // Show success message
+        const message = type === 'purchase' 
+          ? `"${book.title}" added to cart!`
+          : `"${book.title}" added to cart for 7-day rental!`;
+        alert(message);
+      }
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      alert(error.response?.data?.message || 'Failed to add to cart');
+    }
+  };
+
+  // Toggle wishlist
+  const toggleWishlist = async (e, bookId) => {
+    e.preventDefault(); // Prevent navigation
+    e.stopPropagation(); // Stop event bubbling
+
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        'http://localhost:5001/api/wishlist/add',
+        { bookId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      // Trigger wishlist update event
+      window.dispatchEvent(new Event('wishlist-updated'));
+      alert('Added to wishlist!');
+    } catch (error) {
+      if (error.response?.data?.message === 'Book already in wishlist') {
+        // Remove from wishlist
+        try {
+          await axios.delete(
+            `http://localhost:5001/api/wishlist/remove/${bookId}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          window.dispatchEvent(new Event('wishlist-updated'));
+          alert('Removed from wishlist');
+        } catch (err) {
+          console.error('Error removing from wishlist:', err);
+        }
+      } else {
+        console.error('Error toggling wishlist:', error);
+      }
+    }
   };
 
   // Fetch books from API
@@ -98,15 +176,40 @@ function BookCatalog() {
 
             {/* User Actions */}
             <div className="flex items-center space-x-4">
-              <span className="hidden sm:block text-gray-700 font-medium">
-                Hello, {user.fullName || 'User'}
-              </span>
-              <button
-                onClick={handleLogout}
-                className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-md transition text-sm md:text-base"
+              <Link
+                to="/orders"
+                className="flex items-center space-x-1 px-3 py-2 text-blue-600 hover:bg-blue-50 rounded-md transition"
+                title="My Orders"
               >
-                Logout
-              </button>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                </svg>
+                <span className="hidden md:inline text-sm font-medium">My Orders</span>
+              </Link>
+              <Link
+                to="/fines"
+                className="flex items-center space-x-1 px-3 py-2 text-red-600 hover:bg-red-50 rounded-md transition"
+                title="Fine Payments"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="hidden md:inline text-sm font-medium">Fines</span>
+              </Link>
+              <Link
+                to="/rewards"
+                className="flex items-center space-x-1 px-3 py-2 text-purple-600 hover:bg-purple-50 rounded-md transition"
+                title="Rewards"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
+                </svg>
+                <span className="hidden md:inline text-sm font-medium">Rewards</span>
+              </Link>
+              <NotificationBell />
+              <WishlistIcon />
+              <CartIcon />
+              <UserProfileMenu />
             </div>
           </div>
         </div>
@@ -304,6 +407,18 @@ function BookCatalog() {
                           e.target.src = 'https://via.placeholder.com/400x600?text=No+Cover';
                         }}
                       />
+                      
+                      {/* Wishlist Button */}
+                      <button
+                        onClick={(e) => toggleWishlist(e, book._id)}
+                        className="absolute top-2 left-2 p-2 bg-white/90 hover:bg-white rounded-full shadow-lg transition z-10"
+                        title="Add to wishlist"
+                      >
+                        <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                        </svg>
+                      </button>
+                      
                       {book.stock?.available === 0 && (
                         <div className="absolute top-2 right-2 bg-red-500 text-white text-xs px-2 py-1 rounded">
                           Out of Stock
@@ -349,10 +464,10 @@ function BookCatalog() {
                       <div className="mb-3">
                         <div className="flex items-center justify-between">
                           <span className="text-lg font-bold text-gray-800">
-                            ${book.price?.purchase || 0}
+                            Rs. {book.price?.purchase || 0}
                           </span>
                           <span className="text-sm text-gray-600">
-                            Rent: ${book.price?.rental?.perDay || 0}/day
+                            Rent: Rs. {book.price?.rental?.perDay || 0}/day
                           </span>
                         </div>
                       </div>
@@ -360,12 +475,14 @@ function BookCatalog() {
                       {/* Actions */}
                       <div className="flex gap-2">
                         <button 
+                          onClick={(e) => addToCart(e, book, 'purchase')}
                           className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition disabled:bg-gray-400 disabled:cursor-not-allowed"
                           disabled={book.stock?.available === 0}
                         >
-                          {book.stock?.available === 0 ? 'Out of Stock' : 'Buy'}
+                          {book.stock?.available === 0 ? 'Out of Stock' : 'Add to Cart'}
                         </button>
                         <button 
+                          onClick={(e) => addToCart(e, book, 'rental')}
                           className="flex-1 px-3 py-2 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 rounded-md text-sm font-medium transition disabled:border-gray-400 disabled:text-gray-400"
                           disabled={book.stock?.available === 0}
                         >
@@ -438,17 +555,34 @@ function BookCatalog() {
                           <div className="flex flex-col items-end gap-3">
                             <div className="text-right">
                               <div className="text-2xl font-bold text-gray-800">
-                                ${book.price?.purchase || 0}
+                                Rs. {book.price?.purchase || 0}
                               </div>
                               <div className="text-sm text-gray-600">
-                                Rent: ${book.price?.rental?.perDay || 0}/day
+                                Rent: Rs. {book.price?.rental?.perDay || 0}/day
                               </div>
                             </div>
                             <div className="flex gap-2">
-                              <button className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition">
-                                Buy Now
+                              <button
+                                onClick={(e) => toggleWishlist(e, book._id)}
+                                className="p-2 border border-red-200 hover:bg-red-50 rounded-md transition"
+                                title="Add to wishlist"
+                              >
+                                <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                                </svg>
                               </button>
-                              <button className="px-6 py-2 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 rounded-md font-medium transition">
+                              <button 
+                                onClick={(e) => addToCart(e, book, 'purchase')}
+                                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                disabled={book.stock?.available === 0}
+                              >
+                                {book.stock?.available === 0 ? 'Out of Stock' : 'Add to Cart'}
+                              </button>
+                              <button 
+                                onClick={(e) => addToCart(e, book, 'rental')}
+                                className="px-6 py-2 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 rounded-md font-medium transition disabled:border-gray-400 disabled:text-gray-400"
+                                disabled={book.stock?.available === 0}
+                              >
                                 Rent
                               </button>
                             </div>

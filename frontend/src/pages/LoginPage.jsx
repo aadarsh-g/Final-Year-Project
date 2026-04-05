@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 
@@ -46,8 +46,24 @@ function LoginPage() {
         navigate('/catalog');
       }
     } catch (err) {
-      const errorMessage = err.response?.data?.message || "Login failed. Please try again.";
-      setError(errorMessage);
+      const errorData = err.response?.data;
+      
+      // Check if verification is required
+      if (errorData?.requiresVerification) {
+        setError(errorData.message);
+        // Redirect to verify page after 2 seconds
+        setTimeout(() => {
+          navigate('/verify-account', {
+            state: {
+              userId: errorData.userId,
+              email: errorData.email
+            }
+          });
+        }, 2000);
+      } else {
+        const errorMessage = errorData?.message || "Login failed. Please try again.";
+        setError(errorMessage);
+      }
     } finally {
       setLoading(false);
     }

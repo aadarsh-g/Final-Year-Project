@@ -8,18 +8,29 @@ const {
   deleteBook,
   updateBookStock,
   toggleBookActive,
-  getBookStats
+  getBookStats,
+  getReviews,
+  addReview,
+  updateReview,
 } = require('../controllers/bookController');
+const { protect } = require('../middleware/auth');
 
-// All routes are now public - no authentication required
+// Public routes
 router.get('/', getAllBooks);
+router.get('/admin/stats', getBookStats);
 router.get('/:id', getBookById);
+
+// Admin book management
 router.post('/', createBook);
 router.put('/:id', updateBook);
 router.delete('/:id', deleteBook);
 router.patch('/:id/stock', updateBookStock);
 router.patch('/:id/toggle-active', toggleBookActive);
-router.get('/admin/stats', getBookStats);
+
+// Review routes
+router.get('/:id/reviews', getReviews);
+router.post('/:id/reviews', protect, addReview);
+router.put('/:id/reviews/:reviewId', protect, updateReview);
 
 module.exports = router;
 

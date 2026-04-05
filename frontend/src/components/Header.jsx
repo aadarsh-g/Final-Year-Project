@@ -1,13 +1,9 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import UserProfileMenu from "./UserProfileMenu";
 
 function Header() {
-  const { user, isAuthenticated, logout } = useAuth();
-
-  const handleLogout = () => {
-    logout();
-    window.location.href = '/';
-  };
+  const { isAuthenticated } = useAuth();
 
   return (
     <header className="bg-white shadow-sm sticky top-0 z-50">
@@ -45,25 +41,7 @@ function Header() {
 
           <div className="flex items-center space-x-4">
             {isAuthenticated ? (
-              <div className="flex items-center space-x-4">
-                <div className="hidden sm:flex items-center space-x-2">
-                  <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-                    <span className="text-white font-semibold text-sm">
-                      {user?.fullName?.charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-gray-900">{user?.fullName}</span>
-                    <span className="text-xs text-gray-500 capitalize">{user?.role}</span>
-                  </div>
-                </div>
-                <button
-                  onClick={handleLogout}
-                  className="text-gray-700 hover:text-red-600 transition font-medium"
-                >
-                  Logout
-                </button>
-              </div>
+              <UserProfileMenu />
             ) : (
               <>
                 <Link

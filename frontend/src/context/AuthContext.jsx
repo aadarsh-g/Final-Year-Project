@@ -12,10 +12,21 @@ export const useAuth = () => {
   return context;
 };
 
+function readStoredUser() {
+  try {
+    const raw = localStorage.getItem('user');
+    if (!raw || raw === 'undefined') return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  // Hydrate immediately from localStorage so UI (e.g. Settings) matches the sidebar before /auth/me returns
+  const [user, setUser] = useState(() => readStoredUser());
   const [loading, setLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('token'));
 
   // Check if user is logged in on mount
   useEffect(() => {
@@ -24,21 +35,30 @@ export const AuthProvider = ({ children }) => {
 
   const checkAuth = async () => {
     const token = localStorage.getItem('token');
-    const storedUser = localStorage.getItem('user');
+    const storedUser = readStoredUser();
 
     if (token && storedUser) {
       try {
-        // Verify token is still valid
         const response = await api.get('/auth/me');
-        setUser(response.data.user);
+        const me = response.data.user;
+        if (me) {
+          setUser(me);
+          localStorage.setItem('user', JSON.stringify(me));
+        }
         setIsAuthenticated(true);
       } catch (error) {
-        // Token invalid, clear storage
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setUser(null);
-        setIsAuthenticated(false);
+        // Only clear session on auth failure (401), not network / server errors
+        const status = error.response?.status;
+        if (status === 401 || status === 403) {
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          setUser(null);
+          setIsAuthenticated(false);
+        }
       }
+    } else if (!token) {
+      setUser(null);
+      setIsAuthenticated(false);
     }
     setLoading(false);
   };
@@ -101,6 +121,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const updateUser = (updatedUser) => {
+    if (!updatedUser) return;
     setUser(updatedUser);
     localStorage.setItem('user', JSON.stringify(updatedUser));
   };

@@ -11,6 +11,9 @@ function AdminBookManagement() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState("");
 
   // Form state
   const [formData, setFormData] = useState({
@@ -105,9 +108,63 @@ function AdminBookManagement() {
     }
   };
 
+  // Handle image file selection
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        alert('Please select an image file');
+        return;
+      }
+      
+      // Validate file size (5MB max)
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Image size should be less than 5MB');
+        return;
+      }
+
+      setImageFile(file);
+      
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Upload image to Cloudinary
+  const uploadImage = async () => {
+    if (!imageFile) return null;
+
+    try {
+      setUploadingImage(true);
+      const formData = new FormData();
+      formData.append('image', imageFile);
+
+      const response = await axios.post('http://localhost:5001/api/upload/image', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      return response.data.imageUrl;
+    } catch (error) {
+      console.error('Image upload error:', error);
+      alert('Failed to upload image. Please try again.');
+      return null;
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   // Open add modal
   const handleAddBook = () => {
     setModalMode("add");
+    setImageFile(null);
+    setImagePreview("");
     setFormData({
       title: "",
       author: "",
@@ -137,6 +194,8 @@ function AdminBookManagement() {
   const handleEditBook = (book) => {
     setModalMode("edit");
     setSelectedBook(book);
+    setImageFile(null);
+    setImagePreview(book.coverImage || "");
     setFormData({
       title: book.title,
       author: book.author,
@@ -167,15 +226,32 @@ function AdminBookManagement() {
     e.preventDefault();
     
     try {
+      // Upload image if new file is selected
+      let imageUrl = formData.coverImage;
+      if (imageFile) {
+        imageUrl = await uploadImage();
+        if (!imageUrl) {
+          alert('Failed to upload image. Please try again.');
+          return;
+        }
+      }
+
+      const dataToSubmit = {
+        ...formData,
+        coverImage: imageUrl
+      };
+
       if (modalMode === "add") {
-        await axios.post("http://localhost:5001/api/books", formData);
+        await axios.post("http://localhost:5001/api/books", dataToSubmit);
         alert("Book added successfully!");
       } else {
-        await axios.put(`http://localhost:5001/api/books/${selectedBook._id}`, formData);
+        await axios.put(`http://localhost:5001/api/books/${selectedBook._id}`, dataToSubmit);
         alert("Book updated successfully!");
       }
       
       setShowModal(false);
+      setImageFile(null);
+      setImagePreview("");
       fetchBooks();
     } catch (error) {
       console.error("Error saving book:", error);
@@ -318,7 +394,7 @@ function AdminBookManagement() {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          ${book.price.purchase}
+                          Rs. {book.price.purchase}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">{book.stock.available} / {book.stock.total}</div>
@@ -433,17 +509,31 @@ function AdminBookManagement() {
                 />
               </div>
 
-              {/* Cover Image URL */}
+              {/* Cover Image Upload */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Cover Image URL</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Cover Image *</label>
+                
+                {/* Image Preview */}
+                {imagePreview && (
+                  <div className="mb-3">
+                    <img 
+                      src={imagePreview} 
+                      alt="Preview" 
+                      className="h-40 w-auto object-cover rounded border shadow-sm"
+                    />
+                  </div>
+                )}
+                
+                {/* File Input */}
                 <input
-                  type="url"
-                  name="coverImage"
-                  value={formData.coverImage}
-                  onChange={handleInputChange}
-                  placeholder="https://example.com/image.jpg"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageChange}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100"
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Upload an image (JPG, PNG, WEBP, GIF - Max 5MB)
+                </p>
               </div>
 
               {/* Category & Language */}
@@ -515,28 +605,30 @@ function AdminBookManagement() {
               {/* Pricing */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Price ($) *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Purchase Price (Rs.) *</label>
                   <input
                     type="number"
                     name="price.purchase"
                     value={formData.price.purchase}
                     onChange={handleInputChange}
                     required
-                    min="0"
-                    step="0.01"
+                    min="1000"
+                    step="1"
+                    placeholder="Min. Rs. 1000"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Rental Price/Day ($) *</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Rental Price/Day (Rs.) *</label>
                   <input
                     type="number"
                     name="price.rental.perDay"
                     value={formData.price.rental.perDay}
                     onChange={handleInputChange}
                     required
-                    min="0"
-                    step="0.01"
+                    min="50"
+                    step="1"
+                    placeholder="Min. Rs. 50"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500"
                   />
                 </div>
@@ -581,9 +673,20 @@ function AdminBookManagement() {
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition"
+                  disabled={uploadingImage}
+                  className="px-6 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center"
                 >
-                  {modalMode === "add" ? "Add Book" : "Update Book"}
+                  {uploadingImage ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Uploading...
+                    </>
+                  ) : (
+                    modalMode === "add" ? "Add Book" : "Update Book"
+                  )}
                 </button>
               </div>
             </form>

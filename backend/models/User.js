@@ -52,6 +52,22 @@ const userSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  // Email verification fields
+  isVerified: {
+    type: Boolean,
+    default: function() {
+      // Google OAuth users are auto-verified
+      return this.authProvider === 'google';
+    }
+  },
+  verificationOTP: {
+    type: String,
+    select: false // Don't return OTP in queries by default
+  },
+  otpExpires: {
+    type: Date,
+    select: false
+  },
   agreedToTerms: {
     type: Boolean,
     required: function() {

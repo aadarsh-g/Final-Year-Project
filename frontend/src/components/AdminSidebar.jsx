@@ -1,8 +1,21 @@
 import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 
 function AdminSidebar({ sidebarOpen, setSidebarOpen }) {
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Read logged-in user from localStorage
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+  const userName = user.fullName || user.name || 'Admin';
+  const userEmail = user.email || '';
+  const userInitial = userName.charAt(0).toUpperCase();
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    navigate('/login');
+  };
 
   // Helper function to check if route is active
   const isActive = (path) => location.pathname === path;
@@ -118,6 +131,26 @@ function AdminSidebar({ sidebarOpen, setSidebarOpen }) {
               <span className="font-medium">Rentals</span>
             </Link>
 
+            {/* Fine Management */}
+            <Link
+              to="/admin/fines"
+              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition ${
+                isActive("/admin/fines")
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              <span className="font-medium">Fine Management</span>
+            </Link>
+
             {/* Users */}
             <Link
               to="/admin/users"
@@ -138,11 +171,11 @@ function AdminSidebar({ sidebarOpen, setSidebarOpen }) {
               <span className="font-medium">Users</span>
             </Link>
 
-            {/* Analytics */}
+            {/* Announcements */}
             <Link
-              to="/admin/analytics"
+              to="/admin/announcements"
               className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition ${
-                isActive("/admin/analytics")
+                isActive("/admin/announcements")
                   ? "bg-blue-600 text-white"
                   : "text-gray-700 hover:bg-gray-100"
               }`}
@@ -152,10 +185,10 @@ function AdminSidebar({ sidebarOpen, setSidebarOpen }) {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                  d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"
                 />
               </svg>
-              <span className="font-medium">Analytics</span>
+              <span className="font-medium">Announcements</span>
             </Link>
 
             {/* Settings */}
@@ -188,16 +221,16 @@ function AdminSidebar({ sidebarOpen, setSidebarOpen }) {
           {/* User Profile */}
           <div className="p-4 border-t border-gray-200">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold">
-                A
+              <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-semibold flex-shrink-0">
+                {userInitial}
               </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium text-gray-900">Admin User</p>
-                <p className="text-xs text-gray-500">admin@bookify.com</p>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-gray-900 truncate">{userName}</p>
+                <p className="text-xs text-gray-500 truncate">{userEmail}</p>
               </div>
-              <Link
-                to="/login"
-                className="text-gray-400 hover:text-gray-600"
+              <button
+                onClick={handleLogout}
+                className="text-gray-400 hover:text-red-500 transition flex-shrink-0"
                 title="Logout"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -208,7 +241,7 @@ function AdminSidebar({ sidebarOpen, setSidebarOpen }) {
                     d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
                   />
                 </svg>
-              </Link>
+              </button>
             </div>
           </div>
         </div>

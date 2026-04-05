@@ -60,16 +60,29 @@ function SignupPage() {
         agreedToTerms: formData.agreedToTerms
       });
 
-      // Store token and user data
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-
-      setSuccess(true);
-      
-      // Redirect to catalog after successful signup
-      setTimeout(() => {
-        navigate('/catalog');
-      }, 1500);
+      // Check if verification is required
+      if (response.data.requiresVerification) {
+        setSuccess(true);
+        
+        // Redirect to verify page with user data
+        setTimeout(() => {
+          navigate('/verify-account', {
+            state: {
+              userId: response.data.userId,
+              email: response.data.email,
+            },
+          });
+        }, 1500);
+      } else {
+        // Old flow (for Google OAuth or if verification disabled)
+        localStorage.setItem('token', response.data.token);
+        localStorage.setItem('user', JSON.stringify(response.data.user));
+        setSuccess(true);
+        
+        setTimeout(() => {
+          navigate('/catalog');
+        }, 1500);
+      }
     } catch (err) {
       console.error('Signup error:', err);
       const errorMessage = err.response?.data?.message || "Signup failed. Please try again.";
@@ -166,7 +179,7 @@ function SignupPage() {
                     <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    <p className="text-sm text-green-800">Account created successfully! Redirecting...</p>
+                    <p className="text-sm text-green-800">Account created! Check your email for verification code...</p>
                   </div>
                 </div>
               )}

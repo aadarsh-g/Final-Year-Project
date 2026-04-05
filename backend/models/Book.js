@@ -8,6 +8,12 @@ const bookSchema = new mongoose.Schema(
       trim: true,
       maxlength: [200, 'Title cannot exceed 200 characters']
     },
+    slug: {
+      type: String,
+      unique: true,
+      trim: true,
+      lowercase: true
+    },
     author: {
       type: String,
       required: [true, 'Please provide author name'],
@@ -116,6 +122,37 @@ const bookSchema = new mongoose.Schema(
         default: 0
       }
     },
+    reviews: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+          required: true,
+        },
+        userName: {
+          type: String,
+          required: true,
+        },
+        rating: {
+          type: Number,
+          required: true,
+          min: 1,
+          max: 5,
+        },
+        comment: {
+          type: String,
+          maxlength: 1000,
+          default: '',
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+        updatedAt: {
+          type: Date,
+        },
+      },
+    ],
     isActive: {
       type: Boolean,
       default: true
@@ -152,6 +189,7 @@ bookSchema.index({ category: 1 });
 bookSchema.index({ isActive: 1 });
 bookSchema.index({ 'price.purchase': 1 });
 bookSchema.index({ createdAt: -1 });
+bookSchema.index({ slug: 1 }); // Add index for slug lookup
 
 // Virtual for stock status
 bookSchema.virtual('stockStatus').get(function () {
@@ -160,8 +198,33 @@ bookSchema.virtual('stockStatus').get(function () {
   return 'In Stock';
 });
 
-// Pre-save middleware to ensure available stock doesn't exceed total
-bookSchema.pre('save', function (next) {
+// Helper function to generate slug from title
+function generateSlug(title) {
+  return title
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, '') // Remove special characters
+    .replace(/\s+/g, '-') // Replace spaces with hyphens
+    .replace(/-+/g, '-') // Replace multiple hyphens with single hyphen
+    .substring(0, 100); // Limit length
+}
+
+// Pre-save middleware to generate slug and ensure stock constraints
+bookSchema.pre('save', async function (next) {
+  // Generate slug if not exists or title changed
+  if (!this.slug || this.isModified('title')) {
+    let slug = generateSlug(this.title);
+    
+    // Check if slug exists and make it unique
+    const existingBook = await this.constructor.findOne({ slug, _id: { $ne: this._id } });
+    if (existingBook) {
+      slug = `${slug}-${Date.now().toString(36)}`;
+    }
+    
+    this.slug = slug;
+  }
+  
+  // Ensure available stock doesn't exceed total
   if (this.stock.available > this.stock.total) {
     this.stock.available = this.stock.total;
   }

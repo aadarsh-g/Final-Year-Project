@@ -499,7 +499,7 @@ function AdminUsers() {
                           <p className="text-xs text-gray-500">2 days ago</p>
                         </div>
                       </div>
-                      <span className="text-sm text-gray-600">$15.99</span>
+                      <span className="text-sm text-gray-600">Rs. 1599</span>
                     </div>
 
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
@@ -519,7 +519,7 @@ function AdminUsers() {
                           <p className="text-xs text-gray-500">1 week ago</p>
                         </div>
                       </div>
-                      <span className="text-sm text-gray-600">$4.99</span>
+                      <span className="text-sm text-gray-600">Rs. 499</span>
                     </div>
 
                     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
@@ -556,7 +556,7 @@ function AdminUsers() {
                       <p className="text-xs text-green-800">Books Rented</p>
                     </div>
                     <div className="p-4 bg-purple-50 rounded-lg text-center">
-                      <p className="text-2xl font-bold text-purple-600">$234</p>
+                      <p className="text-2xl font-bold text-purple-600">Rs. 23400</p>
                       <p className="text-xs text-purple-800">Total Spent</p>
                     </div>
                   </div>

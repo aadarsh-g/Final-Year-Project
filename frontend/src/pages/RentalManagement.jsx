@@ -1,487 +1,546 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import axios from "axios";
 import AdminLayout from "../components/AdminLayout";
 
-function RentalManagement() {
-  const [activeTab, setActiveTab] = useState("active");
-  const [selectedRental, setSelectedRental] = useState(null);
-  const [showReturnModal, setShowReturnModal] = useState(false);
+const API = "http://localhost:5001/api";
 
-  // Mock rental data
-  const activeRentals = [
-    {
-      id: "RNT001",
-      user: { name: "Sarah Johnson", email: "sarah.j@email.com", phone: "+1 234-567-8901" },
-      book: { title: "It Ends With Us", author: "Colleen Hoover", isbn: "978-1501110368" },
-      rentedDate: "2024-12-15",
-      dueDate: "2024-12-29",
-      duration: 14,
-      amount: 7.98,
-      status: "Active",
-      condition: "Good",
-      daysLeft: 3,
-    },
-    {
-      id: "RNT002",
-      user: { name: "Mike Chen", email: "mike.c@email.com", phone: "+1 234-567-8902" },
-      book: { title: "The Great Gatsby", author: "F. Scott Fitzgerald", isbn: "978-0743273565" },
-      rentedDate: "2024-12-18",
-      dueDate: "2024-12-25",
-      duration: 7,
-      amount: 2.99,
-      status: "Overdue",
-      condition: "Good",
-      daysLeft: -1,
-      lateFee: 2.00,
-    },
-    {
-      id: "RNT003",
-      user: { name: "Emma Davis", email: "emma.d@email.com", phone: "+1 234-567-8903" },
-      book: { title: "1984", author: "George Orwell", isbn: "978-0451524935" },
-      rentedDate: "2024-12-20",
-      dueDate: "2025-01-03",
-      duration: 14,
-      amount: 5.98,
-      status: "Active",
-      condition: "Good",
-      daysLeft: 8,
-    },
-    {
-      id: "RNT004",
-      user: { name: "John Smith", email: "john.s@email.com", phone: "+1 234-567-8904" },
-      book: { title: "Pride and Prejudice", author: "Jane Austen", isbn: "978-0141439518" },
-      rentedDate: "2024-12-10",
-      dueDate: "2024-12-24",
-      duration: 14,
-      amount: 4.98,
-      status: "Overdue",
-      condition: "Good",
-      daysLeft: -2,
-      lateFee: 4.00,
-    },
+const authHeader = () => ({
+  Authorization: `Bearer ${localStorage.getItem("token")}`,
+});
+
+const fmtDate = (d) =>
+  d
+    ? new Date(d).toLocaleDateString("en-NP", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })
+    : "—";
+
+const daysOverdue = (dueDate) =>
+  Math.max(0, Math.ceil((Date.now() - new Date(dueDate)) / 86_400_000));
+
+const daysLeft = (dueDate) =>
+  Math.ceil((new Date(dueDate) - Date.now()) / 86_400_000);
+
+/* ── Status badge ──────────────────────────────────────────────────────── */
+const StatusBadge = ({ status }) => {
+  const map = {
+    active: "bg-green-100 text-green-800 border-green-200",
+    overdue: "bg-red-100 text-red-800 border-red-200",
+    returned: "bg-gray-100 text-gray-700 border-gray-200",
+  };
+  const labels = { active: "Active", overdue: "Overdue", returned: "Returned" };
+  return (
+    <span
+      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+        map[status] || "bg-yellow-100 text-yellow-800 border-yellow-200"
+      }`}
+    >
+      {labels[status] || status}
+    </span>
+  );
+};
+
+/* ── Fine badge ────────────────────────────────────────────────────────── */
+const FineBadge = ({ fineStatus, fineAmount }) => {
+  if (!fineAmount || fineStatus === "none") return <span className="text-gray-400 text-xs">—</span>;
+  const map = {
+    pending: "bg-red-100 text-red-700 border-red-200",
+    paid: "bg-green-100 text-green-700 border-green-200",
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+        map[fineStatus] || ""
+      }`}
+    >
+      ₹{fineAmount} · {fineStatus}
+    </span>
+  );
+};
+
+/* ── Toast ─────────────────────────────────────────────────────────────── */
+const Toast = ({ msg, type }) => {
+  if (!msg) return null;
+  const colours =
+    type === "success"
+      ? "bg-green-600"
+      : type === "error"
+      ? "bg-red-600"
+      : "bg-blue-600";
+  return (
+    <div
+      className={`fixed top-4 right-4 z-50 px-5 py-3 rounded-lg text-white text-sm shadow-lg ${colours}`}
+    >
+      {msg}
+    </div>
+  );
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Main component
+══════════════════════════════════════════════════════════════════════════ */
+export default function RentalManagement() {
+  const [rentals, setRentals] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  const [activeTab, setActiveTab] = useState("active"); // active | overdue | returned | all
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState(null); // rental detail modal
+
+  const [toast, setToast] = useState({ msg: "", type: "" });
+  const showToast = (msg, type = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast({ msg: "", type: "" }), 3500);
+  };
+
+  /* ── fetch ─────────────────────────────────────────────────────────── */
+  const fetchRentals = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data } = await axios.get(`${API}/rentals/all`, {
+        headers: authHeader(),
+      });
+      setRentals(data.rentals || []);
+    } catch (err) {
+      console.error("Fetch rentals error:", err);
+      setError(
+        err.response?.data?.message || "Failed to load rentals. Check your connection."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchRentals();
+  }, [fetchRentals]);
+
+  /* ── mark as returned ──────────────────────────────────────────────── */
+  const handleReturn = async (rentalId) => {
+    if (!window.confirm("Mark this rental as returned?")) return;
+    try {
+      await axios.patch(`${API}/rentals/${rentalId}/return`, {}, { headers: authHeader() });
+      showToast("Book marked as returned ✅");
+      setSelected(null);
+      fetchRentals();
+    } catch (err) {
+      showToast(err.response?.data?.message || "Failed to mark as returned", "error");
+    }
+  };
+
+  /* ── mark fine as paid ─────────────────────────────────────────────── */
+  const handlePayFine = async (rentalId) => {
+    if (!window.confirm("Mark fine as paid?")) return;
+    try {
+      await axios.post(
+        `${API}/rentals/${rentalId}/pay-fine`,
+        { paymentMethod: "cash_on_delivery" },
+        { headers: authHeader() }
+      );
+      showToast("Fine marked as paid ✅");
+      setSelected(null);
+      fetchRentals();
+    } catch (err) {
+      showToast(err.response?.data?.message || "Failed to mark fine as paid", "error");
+    }
+  };
+
+  /* ── derived data ──────────────────────────────────────────────────── */
+  const filtered = rentals.filter((r) => {
+    const q = search.toLowerCase();
+    const matchSearch =
+      !q ||
+      r.user?.fullName?.toLowerCase().includes(q) ||
+      r.user?.email?.toLowerCase().includes(q) ||
+      r.book?.title?.toLowerCase().includes(q) ||
+      r.rentalNumber?.toLowerCase().includes(q);
+
+    const matchTab =
+      activeTab === "all" ||
+      (activeTab === "active" && r.status === "active") ||
+      (activeTab === "overdue" && r.status === "overdue") ||
+      (activeTab === "returned" && r.status === "returned");
+
+    return matchSearch && matchTab;
+  });
+
+  const counts = {
+    all: rentals.length,
+    active: rentals.filter((r) => r.status === "active").length,
+    overdue: rentals.filter((r) => r.status === "overdue").length,
+    returned: rentals.filter((r) => r.status === "returned").length,
+  };
+
+  const totalFinesPending = rentals
+    .filter((r) => r.fineStatus === "pending")
+    .reduce((s, r) => s + (r.fineAmount || 0), 0);
+
+  /* ── UI ────────────────────────────────────────────────────────────── */
+  const tabs = [
+    { key: "active", label: "Active", colour: "text-green-600" },
+    { key: "overdue", label: "Overdue", colour: "text-red-600" },
+    { key: "returned", label: "Returned", colour: "text-gray-600" },
+    { key: "all", label: "All", colour: "text-blue-600" },
   ];
-
-  const returnedRentals = [
-    {
-      id: "RNT005",
-      user: { name: "Lisa Anderson", email: "lisa.a@email.com" },
-      book: { title: "The Hobbit", author: "J.R.R. Tolkien", isbn: "978-0547928227" },
-      rentedDate: "2024-12-01",
-      dueDate: "2024-12-15",
-      returnedDate: "2024-12-14",
-      duration: 14,
-      amount: 7.98,
-      status: "Returned",
-      returnCondition: "Good",
-      lateFee: 0,
-    },
-    {
-      id: "RNT006",
-      user: { name: "Tom Wilson", email: "tom.w@email.com" },
-      book: { title: "Harry Potter", author: "J.K. Rowling", isbn: "978-0439708180" },
-      rentedDate: "2024-12-05",
-      dueDate: "2024-12-19",
-      returnedDate: "2024-12-21",
-      duration: 14,
-      amount: 9.98,
-      status: "Returned Late",
-      returnCondition: "Good",
-      lateFee: 4.00,
-    },
-  ];
-
-  const calculateLateFee = (daysLate) => {
-    const feePerDay = 2.00;
-    return (Math.abs(daysLate) * feePerDay).toFixed(2);
-  };
-
-  const handleReturnBook = (rental) => {
-    setSelectedRental(rental);
-    setShowReturnModal(true);
-  };
-
-  const confirmReturn = (condition) => {
-    console.log("Returning book:", selectedRental.id, "Condition:", condition);
-    // In real app, send to API
-    setShowReturnModal(false);
-    setSelectedRental(null);
-  };
-
-  const getDaysLeftColor = (daysLeft) => {
-    if (daysLeft < 0) return "text-red-600";
-    if (daysLeft <= 3) return "text-yellow-600";
-    return "text-green-600";
-  };
-
-  const getStatusBadge = (status) => {
-    const badges = {
-      "Active": "bg-blue-100 text-blue-800",
-      "Overdue": "bg-red-100 text-red-800",
-      "Returned": "bg-green-100 text-green-800",
-      "Returned Late": "bg-yellow-100 text-yellow-800",
-    };
-    return badges[status] || "bg-gray-100 text-gray-800";
-  };
 
   return (
-    <AdminLayout 
-      title="Rental Management" 
-      subtitle="Track and manage book rentals, returns, and overdue items"
-    >
-      {/* Page Header */}
+    <AdminLayout>
+      <Toast msg={toast.msg} type={toast.type} />
+
+      {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Rental Return Management</h1>
-        <p className="text-gray-600">Track and manage book rentals and returns</p>
+        <h1 className="text-2xl font-bold text-gray-900">Rental Management</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Manage all book rentals, overdue returns, and fines.
+        </p>
       </div>
 
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-blue-100 rounded-lg">
-                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-            </div>
-            <p className="text-2xl font-bold text-gray-800">{activeRentals.filter(r => r.status === "Active").length}</p>
-            <p className="text-sm text-gray-600">Active Rentals</p>
-          </div>
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <SummaryCard label="Total Rentals" value={counts.all} colour="blue" />
+        <SummaryCard label="Active" value={counts.active} colour="green" />
+        <SummaryCard label="Overdue" value={counts.overdue} colour="red" />
+        <SummaryCard
+          label="Pending Fines"
+          value={`₹${totalFinesPending.toLocaleString()}`}
+          colour="yellow"
+        />
+      </div>
 
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-red-100 rounded-lg">
-                <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-            </div>
-            <p className="text-2xl font-bold text-gray-800">{activeRentals.filter(r => r.status === "Overdue").length}</p>
-            <p className="text-sm text-gray-600">Overdue Rentals</p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-green-100 rounded-lg">
-                <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-            </div>
-            <p className="text-2xl font-bold text-gray-800">{returnedRentals.length}</p>
-            <p className="text-sm text-gray-600">Returned This Month</p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-md p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-amber-100 rounded-lg">
-                <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-            </div>
-            <p className="text-2xl font-bold text-gray-800">
-              ${activeRentals.filter(r => r.lateFee).reduce((sum, r) => sum + r.lateFee, 0).toFixed(2)}
-            </p>
-            <p className="text-sm text-gray-600">Pending Late Fees</p>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="bg-white rounded-lg shadow-md mb-6">
-          <div className="border-b border-gray-200">
-            <nav className="flex -mb-px">
+      {/* Toolbar */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-4">
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+          {/* Tabs */}
+          <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+            {tabs.map((t) => (
               <button
-                onClick={() => setActiveTab("active")}
-                className={`px-6 py-4 text-sm font-medium border-b-2 transition ${
-                  activeTab === "active"
-                    ? "border-blue-600 text-blue-600"
-                    : "border-transparent text-gray-600 hover:text-gray-800 hover:border-gray-300"
+                key={t.key}
+                onClick={() => setActiveTab(t.key)}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                  activeTab === t.key
+                    ? "bg-white shadow text-gray-900"
+                    : "text-gray-500 hover:text-gray-700"
                 }`}
               >
-                Active Rentals ({activeRentals.filter(r => r.status === "Active" || r.status === "Overdue").length})
+                {t.label}
+                <span
+                  className={`ml-1.5 text-xs font-bold ${
+                    activeTab === t.key ? t.colour : "text-gray-400"
+                  }`}
+                >
+                  {counts[t.key]}
+                </span>
               </button>
-              <button
-                onClick={() => setActiveTab("overdue")}
-                className={`px-6 py-4 text-sm font-medium border-b-2 transition ${
-                  activeTab === "overdue"
-                    ? "border-blue-600 text-blue-600"
-                    : "border-transparent text-gray-600 hover:text-gray-800 hover:border-gray-300"
-                }`}
-              >
-                Overdue ({activeRentals.filter(r => r.status === "Overdue").length})
-              </button>
-              <button
-                onClick={() => setActiveTab("returned")}
-                className={`px-6 py-4 text-sm font-medium border-b-2 transition ${
-                  activeTab === "returned"
-                    ? "border-blue-600 text-blue-600"
-                    : "border-transparent text-gray-600 hover:text-gray-800 hover:border-gray-300"
-                }`}
-              >
-                Return History
-              </button>
-            </nav>
-          </div>
-        </div>
-
-        {/* Active Rentals Tab */}
-        {activeTab === "active" && (
-          <div className="space-y-4">
-            {activeRentals.filter(r => r.status === "Active" || r.status === "Overdue").map((rental) => (
-              <div key={rental.id} className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition">
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-                  {/* Left Section - Rental Info */}
-                  <div className="flex-1">
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <div className="flex items-center space-x-3 mb-2">
-                          <h3 className="text-lg font-bold text-gray-900">{rental.book.title}</h3>
-                          <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusBadge(rental.status)}`}>
-                            {rental.status}
-                          </span>
-                        </div>
-                        <p className="text-gray-600 mb-1">by {rental.book.author}</p>
-                        <p className="text-sm text-gray-500">ISBN: {rental.book.isbn}</p>
-                      </div>
-                    </div>
-
-                    {/* User Info */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                      <div>
-                        <p className="text-sm text-gray-500 mb-1">Rented By</p>
-                        <p className="font-semibold text-gray-900">{rental.user.name}</p>
-                        <p className="text-sm text-gray-600">{rental.user.email}</p>
-                        <p className="text-sm text-gray-600">{rental.user.phone}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500 mb-1">Rental Details</p>
-                        <p className="text-sm text-gray-700">Rental ID: <span className="font-semibold">{rental.id}</span></p>
-                        <p className="text-sm text-gray-700">Duration: <span className="font-semibold">{rental.duration} days</span></p>
-                        <p className="text-sm text-gray-700">Amount: <span className="font-semibold">${rental.amount}</span></p>
-                      </div>
-                    </div>
-
-                    {/* Dates */}
-                    <div className="flex flex-wrap gap-4 text-sm">
-                      <div>
-                        <span className="text-gray-500">Rented: </span>
-                        <span className="font-medium text-gray-900">{rental.rentedDate}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Due: </span>
-                        <span className="font-medium text-gray-900">{rental.dueDate}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-500">Days {rental.daysLeft >= 0 ? "Left" : "Overdue"}: </span>
-                        <span className={`font-bold ${getDaysLeftColor(rental.daysLeft)}`}>
-                          {Math.abs(rental.daysLeft)} days
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Late Fee Warning */}
-                    {rental.lateFee && (
-                      <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                        <div className="flex items-center space-x-2">
-                          <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                          </svg>
-                          <span className="text-sm font-semibold text-red-800">
-                            Late Fee: ${rental.lateFee.toFixed(2)} ({Math.abs(rental.daysLeft)} days overdue @ $2.00/day)
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Right Section - Actions */}
-                  <div className="flex flex-col space-y-3 lg:w-48">
-                    <button
-                      onClick={() => handleReturnBook(rental)}
-                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition flex items-center justify-center space-x-2"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <span>Process Return</span>
-                    </button>
-                    
-                    <button className="px-4 py-2 border-2 border-blue-600 text-blue-600 hover:bg-blue-50 rounded-lg font-medium transition">
-                      Send Reminder
-                    </button>
-                    
-                    <button className="px-4 py-2 border-2 border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg font-medium transition">
-                      Extend Rental
-                    </button>
-                  </div>
-                </div>
-              </div>
             ))}
           </div>
-        )}
 
-        {/* Overdue Rentals Tab */}
-        {activeTab === "overdue" && (
-          <div className="space-y-4">
-            {activeRentals.filter(r => r.status === "Overdue").length === 0 ? (
-              <div className="bg-white rounded-lg shadow-md p-12 text-center">
-                <svg className="w-16 h-16 text-green-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">No Overdue Rentals!</h3>
-                <p className="text-gray-600">All books are on time or have been returned.</p>
-              </div>
-            ) : (
-              activeRentals.filter(r => r.status === "Overdue").map((rental) => (
-                <div key={rental.id} className="bg-red-50 border-2 border-red-200 rounded-lg shadow-md p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-3 mb-2">
-                        <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                        <h3 className="text-lg font-bold text-red-900">{rental.book.title}</h3>
-                        <span className="px-3 py-1 bg-red-600 text-white rounded-full text-xs font-bold">
-                          {Math.abs(rental.daysLeft)} DAYS OVERDUE
-                        </span>
-                      </div>
-                      <p className="text-gray-700 mb-3">
-                        <strong>{rental.user.name}</strong> - {rental.user.email}
-                      </p>
-                      <p className="text-sm text-gray-700">
-                        Due: <strong>{rental.dueDate}</strong> | Late Fee: <strong className="text-red-700">${rental.lateFee.toFixed(2)}</strong>
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => handleReturnBook(rental)}
-                      className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition"
-                    >
-                      Process Return
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        )}
-
-        {/* Returned Rentals Tab */}
-        {activeTab === "returned" && (
-          <div className="bg-white rounded-lg shadow-md overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rental ID</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Book</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rented</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Returned</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Condition</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Late Fee</th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {returnedRentals.map((rental) => (
-                    <tr key={rental.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">{rental.id}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="font-medium text-gray-900">{rental.book.title}</div>
-                        <div className="text-sm text-gray-500">{rental.book.author}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-gray-700">{rental.user.name}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{rental.rentedDate}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{rental.dueDate}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">{rental.returnedDate}</td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-medium">
-                          {rental.returnCondition}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap font-semibold text-gray-900">
-                        ${rental.lateFee.toFixed(2)}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadge(rental.status)}`}>
-                          {rental.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      
-      {/* Return Modal */}
-      {showReturnModal && selectedRental && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
-            <div className="p-6">
-              <h3 className="text-xl font-bold text-gray-900 mb-4">Process Book Return</h3>
-              
-              <div className="mb-6">
-                <p className="text-gray-700 mb-2"><strong>Book:</strong> {selectedRental.book.title}</p>
-                <p className="text-gray-700 mb-2"><strong>User:</strong> {selectedRental.user.name}</p>
-                <p className="text-gray-700 mb-2"><strong>Rental ID:</strong> {selectedRental.id}</p>
-                <p className="text-gray-700 mb-4"><strong>Rental Amount:</strong> ${selectedRental.amount}</p>
-                
-                {selectedRental.lateFee && (
-                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg mb-4">
-                    <p className="text-sm font-semibold text-red-800">
-                      Late Fee: ${selectedRental.lateFee.toFixed(2)}
-                    </p>
-                    <p className="text-xs text-red-600">({Math.abs(selectedRental.daysLeft)} days overdue)</p>
-                  </div>
-                )}
-
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Book Condition on Return
-                  </label>
-                  <select className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="good">Good - No damage</option>
-                    <option value="fair">Fair - Minor wear</option>
-                    <option value="damaged">Damaged - Requires repair</option>
-                    <option value="lost">Lost - Book not returned</option>
-                  </select>
-                </div>
-
-                <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-sm font-semibold text-blue-900 mb-2">Total Amount to Collect:</p>
-                  <p className="text-2xl font-bold text-blue-900">
-                    ${(selectedRental.amount + (selectedRental.lateFee || 0)).toFixed(2)}
-                  </p>
-                  <p className="text-xs text-blue-700 mt-1">
-                    Rental: ${selectedRental.amount} + Late Fee: ${(selectedRental.lateFee || 0).toFixed(2)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex space-x-3">
-                <button
-                  onClick={() => confirmReturn("good")}
-                  className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition"
-                >
-                  Confirm Return
-                </button>
-                <button
-                  onClick={() => setShowReturnModal(false)}
-                  className="flex-1 px-4 py-2 border-2 border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg font-medium transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
+          {/* Search */}
+          <input
+            type="text"
+            placeholder="Search by user, book, or rental #…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-teal-400"
+          />
         </div>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+        {loading ? (
+          <div className="p-10 text-center text-gray-400">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-teal-500 mx-auto mb-3" />
+            Loading rentals…
+          </div>
+        ) : error ? (
+          <div className="p-10 text-center">
+            <p className="text-red-500 mb-3">{error}</p>
+            <button
+              onClick={fetchRentals}
+              className="px-4 py-2 bg-teal-500 text-white rounded-lg text-sm hover:bg-teal-600"
+            >
+              Try Again
+            </button>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-10 text-center text-gray-400">
+            No rentals found{search ? ` matching "${search}"` : ""}.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  {[
+                    "Rental #",
+                    "User",
+                    "Book",
+                    "Rent Date",
+                    "Due Date",
+                    "Status",
+                    "Fine",
+                    "Actions",
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {filtered.map((r) => (
+                  <tr key={r._id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3 font-mono text-xs text-gray-500">
+                      {r.rentalNumber}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-gray-900 leading-tight">
+                        {r.user?.fullName || "Unknown"}
+                      </div>
+                      <div className="text-xs text-gray-400">{r.user?.email}</div>
+                    </td>
+                    <td className="px-4 py-3 max-w-[180px]">
+                      <div className="font-medium text-gray-900 truncate">
+                        {r.book?.title || "—"}
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        {r.rentalDuration} day{r.rentalDuration !== 1 ? "s" : ""} · ₹
+                        {r.totalRentalAmount}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                      {fmtDate(r.startDate)}
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="font-medium text-gray-800">{fmtDate(r.dueDate)}</div>
+                      {r.status === "active" && (
+                        <div
+                          className={`text-xs ${
+                            daysLeft(r.dueDate) <= 1
+                              ? "text-red-500 font-semibold"
+                              : "text-gray-400"
+                          }`}
+                        >
+                          {daysLeft(r.dueDate) <= 0
+                            ? "Due today!"
+                            : `${daysLeft(r.dueDate)}d left`}
+                        </div>
+                      )}
+                      {r.status === "overdue" && (
+                        <div className="text-xs text-red-500 font-semibold">
+                          {daysOverdue(r.dueDate)}d overdue
+                        </div>
+                      )}
+                      {r.status === "returned" && r.returnDate && (
+                        <div className="text-xs text-gray-400">
+                          Returned {fmtDate(r.returnDate)}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={r.status} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <FineBadge fineStatus={r.fineStatus} fineAmount={r.fineAmount} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => setSelected(r)}
+                        className="px-3 py-1.5 text-xs bg-teal-50 text-teal-700 rounded-md hover:bg-teal-100 font-medium transition-colors"
+                      >
+                        Details
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Detail Modal */}
+      {selected && (
+        <RentalDetailModal
+          rental={selected}
+          onClose={() => setSelected(null)}
+          onReturn={handleReturn}
+          onPayFine={handlePayFine}
+        />
       )}
     </AdminLayout>
   );
 }
 
-export default RentalManagement;
+/* ── Summary Card ──────────────────────────────────────────────────────── */
+function SummaryCard({ label, value, colour }) {
+  const colours = {
+    blue: "bg-blue-50 border-blue-100 text-blue-700",
+    green: "bg-green-50 border-green-100 text-green-700",
+    red: "bg-red-50 border-red-100 text-red-700",
+    yellow: "bg-yellow-50 border-yellow-100 text-yellow-700",
+  };
+  return (
+    <div className={`rounded-xl border p-4 ${colours[colour]}`}>
+      <p className="text-xs font-medium opacity-70 uppercase tracking-wide">{label}</p>
+      <p className="text-2xl font-bold mt-1">{value}</p>
+    </div>
+  );
+}
 
+/* ── Rental Detail Modal ───────────────────────────────────────────────── */
+function RentalDetailModal({ rental: r, onClose, onReturn, onPayFine }) {
+  const overdue = r.status === "overdue";
+  const canReturn = r.status !== "returned";
+  const canPayFine = r.fineStatus === "pending" && r.fineAmount > 0;
+
+  const fmtDate = (d) =>
+    d
+      ? new Date(d).toLocaleDateString("en-NP", {
+          weekday: "short",
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        })
+      : "—";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "rgba(0,0,0,0.45)" }}
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Modal header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Rental Details</h2>
+            <p className="text-xs text-gray-400 font-mono">{r.rentalNumber}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-xl font-bold leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="px-6 py-5 space-y-5">
+          {/* Overdue alert */}
+          {overdue && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+              🚨 This rental is <strong>overdue by {r.overdueDays || "?"} day(s)</strong>.
+              Fine of <strong>₹{r.fineAmount || 100}</strong> has been applied (₹{r.finePerDay || 100}/day × {r.overdueDays || 1} day(s)).
+            </div>
+          )}
+
+          {/* User */}
+          <Section title="User">
+            <Row label="Name" value={r.user?.fullName || "—"} />
+            <Row label="Email" value={r.user?.email || "—"} />
+          </Section>
+
+          {/* Book */}
+          <Section title="Book">
+            <Row label="Title" value={r.book?.title || "—"} />
+            <Row label="Duration" value={`${r.rentalDuration} day(s)`} />
+            <Row label="Rental Fee" value={`₹${r.totalRentalAmount}`} />
+          </Section>
+
+          {/* Dates */}
+          <Section title="Dates">
+            <Row label="Start Date" value={fmtDate(r.startDate)} />
+            <Row label="Due Date" value={fmtDate(r.dueDate)} highlight={overdue} />
+            {r.returnDate && <Row label="Returned On" value={fmtDate(r.returnDate)} />}
+          </Section>
+
+          {/* Status */}
+          <Section title="Status">
+            <Row
+              label="Rental Status"
+              value={<StatusBadge status={r.status} />}
+            />
+            <Row
+              label="Fine Status"
+              value={
+                r.fineAmount > 0 ? (
+                  <span
+                    className={`font-semibold ${
+                      r.fineStatus === "paid" ? "text-green-600" : "text-red-600"
+                    }`}
+                  >
+                    ₹{r.fineAmount} — {r.fineStatus}
+                  </span>
+                ) : (
+                  <span className="text-gray-400 text-xs">No fine</span>
+                )
+              }
+            />
+            {r.reminderSent && (
+              <Row label="Reminder Sent" value={`Yes — ${fmtDate(r.reminderSentAt)}`} />
+            )}
+          </Section>
+        </div>
+
+        {/* Actions */}
+        <div className="px-6 py-4 border-t border-gray-100 flex gap-3 justify-end">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+          >
+            Close
+          </button>
+          {canPayFine && (
+            <button
+              onClick={() => onPayFine(r._id)}
+              className="px-4 py-2 text-sm bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 font-medium"
+            >
+              Mark Fine Paid
+            </button>
+          )}
+          {canReturn && (
+            <button
+              onClick={() => onReturn(r._id)}
+              className="px-4 py-2 text-sm bg-teal-500 text-white rounded-lg hover:bg-teal-600 font-medium"
+            >
+              Mark as Returned
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+        {title}
+      </p>
+      <div className="bg-gray-50 rounded-lg divide-y divide-gray-100">{children}</div>
+    </div>
+  );
+}
+
+function Row({ label, value, highlight }) {
+  return (
+    <div className="flex items-center justify-between px-4 py-2.5 text-sm">
+      <span className="text-gray-500">{label}</span>
+      <span className={`font-medium text-right ${highlight ? "text-red-600" : "text-gray-800"}`}>
+        {value}
+      </span>
+    </div>
+  );
+}
