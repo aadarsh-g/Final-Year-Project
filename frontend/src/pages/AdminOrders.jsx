@@ -13,7 +13,7 @@ function Toast({ message, type, onClose }) {
   const colors =
     type === 'success'
       ? 'bg-green-600 text-white'
-      : 'bg-red-600 text-white';
+      : 'bg-red-600 text-white'; 
 
   return (
     <div
