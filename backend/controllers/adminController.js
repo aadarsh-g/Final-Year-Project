@@ -265,14 +265,14 @@ exports.getDashboardData = async (req, res) => {
       .sort('-createdAt')
       .limit(5)
       .populate('user', 'fullName email')
-      .populate('items.book', 'title');
+      .populate('items.bookId', 'title');
 
     // ── Top 5 books by order count ────────────────────────────────────────
     const topBooksAgg = await Order.aggregate([
       { $unwind: '$items' },
       {
         $group: {
-          _id: '$items.book',
+          _id: '$items.bookId',
           totalSales: { $sum: '$items.quantity' },
           totalRevenue: { $sum: '$items.subtotal' },
         },

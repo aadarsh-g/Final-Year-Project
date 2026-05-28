@@ -1,10 +1,18 @@
 const mongoose = require('mongoose');
 
 const orderItemSchema = new mongoose.Schema({
+  bookId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Book',
+    required: function requiredBookId() {
+      // Keep legacy orders (which only had `book`) valid while we migrate.
+      return !this.book;
+    },
+  },
+  // Legacy field kept for backward compatibility with old orders.
   book: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Book',
-    required: true,
   },
   type: {
     type: String,
@@ -178,6 +186,18 @@ const orderSchema = new mongoose.Schema({
   },
 }, {
   timestamps: true,
+});
+
+// Normalize legacy order items before validation/save.
+orderSchema.pre('validate', function normalizeLegacyBookRefs(next) {
+  if (Array.isArray(this.items)) {
+    for (const item of this.items) {
+      if (!item.bookId && item.book) {
+        item.bookId = item.book;
+      }
+    }
+  }
+  next();
 });
 
 // Generate unique order number

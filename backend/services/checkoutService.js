@@ -28,7 +28,7 @@ class CheckoutService {
       // 3. Prepare order items with book snapshots
       const orderItems = cart.items.map(item => {
         const orderItem = {
-          book: item.bookId._id,
+          bookId: item.bookId._id,
           type: item.type,
           pricePerUnit: item.type === 'purchase' ? item.bookId.price.purchase : item.bookId.price.rental.perDay,
           subtotal: item.subtotal,
@@ -128,7 +128,7 @@ class CheckoutService {
 
           const rental = new Rental({
             user: userId,
-            book: item.book,
+            book: item.bookId,
             startDate,
             dueDate,
             rentalDuration: item.rentalDuration || 1,
@@ -139,7 +139,7 @@ class CheckoutService {
             isPaid: checkoutData.paymentMethod !== 'cash_on_delivery',
           });
           await rental.save();
-          console.log(`✅ Rental document created: ${rental.rentalNumber} for book ${item.book}`);
+          console.log(`✅ Rental document created: ${rental.rentalNumber} for book ${item.bookId}`);
         }
       }
 
@@ -295,7 +295,7 @@ class CheckoutService {
       if (userId) query.user = userId;
       
       const order = await Order.findOne(query)
-        .populate('items.book', 'title author coverImage isbn')
+        .populate('items.bookId', 'title author coverImage isbn')
         .populate('user', 'fullName email');
       
       return order;
@@ -317,7 +317,7 @@ class CheckoutService {
       }
       
       const orders = await Order.find(query)
-        .populate('items.book', 'title author coverImage')
+        .populate('items.bookId', 'title author coverImage')
         .sort({ orderDate: -1 })
         .limit(filters.limit || 50);
       
@@ -345,7 +345,7 @@ class CheckoutService {
       
       const orders = await Order.find(query)
         .populate('user', 'fullName email')
-        .populate('items.book', 'title author coverImage')
+        .populate('items.bookId', 'title author coverImage')
         .sort({ orderDate: -1 })
         .limit(filters.limit || 100);
       
@@ -473,7 +473,9 @@ class CheckoutService {
       const query = { _id: orderId };
       if (userId) query.user = userId;
       
-      const order = await Order.findOne(query).populate('items.bookId');
+      const order = await Order.findOne(query)
+        .populate('items.bookId')
+        .populate('items.book');
       
       if (!order) {
         throw new Error('Order not found');
@@ -485,8 +487,9 @@ class CheckoutService {
       
       // Restore stock for purchased items
       for (const item of order.items) {
-        if (item.type === 'purchase' && item.book) {
-          await Book.findByIdAndUpdate(item.book._id, {
+        const bookRef = item.bookId || item.book;
+        if (item.type === 'purchase' && bookRef) {
+          await Book.findByIdAndUpdate(bookRef._id || bookRef, {
             $inc: { 'stock.available': item.quantity },
           });
         }
